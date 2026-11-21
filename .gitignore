@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+*.log
+.DS_Store
+coverage/
+target/
+**/target/
+.vercel/
+*.wasm
