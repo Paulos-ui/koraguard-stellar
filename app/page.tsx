@@ -141,7 +141,7 @@ export default function Home() {
         .addOperation(Operation.payment({ destination: payTo.trim(), asset: Asset.native(), amount: payNumber.toFixed(7).replace(/0+$/, "").replace(/\.$/, "") }))
         .setTimeout(120)
         .build();
-      const signed = await signTransaction(tx.toXdr(), { network: "TESTNET", address: wallet });
+      const signed = await signTransaction(tx.toXdr(), { networkPassphrase: Networks.TESTNET, address: wallet });
       if (signed.error || !signed.signedTxXdr) throw new Error(signed.error?.message || "Transaction signing was cancelled.");
       const submitted = await server.submitTransaction(TransactionBuilder.fromXdr(signed.signedTxXdr, Networks.TESTNET));
       const proof = { id: crypto.randomUUID(), hash: submitted.hash, destination: payTo.trim(), amount: payNumber, timestamp: new Date().toISOString() };
