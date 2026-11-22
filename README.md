@@ -1,12 +1,36 @@
 # KoraGuard
 
-**Know what is safe to spend. Protect what matters. Pay with confidence.**
+**Every payment has a before.**
 
 A financial operations workspace for freelancers and small businesses building on **Stellar**. KoraGuard brings payment planning, committed reserves, and user-authorized blockchain payments into one straightforward workflow.
 
 > **Status:** Early open-source prototype for the Stellar Buildathon, 2026. Stellar **Testnet only**. The Soroban reserve vault is a draft and is not yet deployed or integrated. This repository is not affiliated with or endorsed by the Stellar Development Foundation.
 
-[Product vision](#the-problem) · [Current capabilities](#current-build-status) · [How it works](#how-koraguard-works) · [Architecture](#technical-architecture) · [One-week roadmap](#one-week-buildathon-roadmap) · [Beyond the buildathon](#long-term-roadmap) · [Run locally](#getting-started)
+[Landing & motion](#the-landing-experience) · [Product vision](#the-problem) · [Current capabilities](#current-build-status) · [How it works](#how-koraguard-works) · [Architecture](#technical-architecture) · [One-week roadmap](#one-week-buildathon-roadmap) · [Beyond the buildathon](#long-term-roadmap) · [Run locally](#getting-started)
+
+## The landing experience
+
+**V0.2 adds a complete product website at `/` and moves the existing wallet dashboard to `/app` without resetting the browser storage keys or changing the payment workflow.** The landing is a public explanation of what KoraGuard is building. It is not a fake fully working product demo.
+
+| Section | Purpose | Experience |
+| --- | --- | --- |
+| Editorial hero | Explain why a wallet balance is not the same as an available budget | Asymmetric headline, mechanical reserve card, deliberate depth movement |
+| The problem | Show the hidden obligations behind a single balance | Oversized typography and a worked illustrative ledger |
+| Product philosophy | Establish the central principle | Full-bleed statement with masked scroll reveal |
+| Planning lab | Invite visitors to examine the core financial logic | Three interactive amount sliders and immediate pass/review feedback |
+| How it works | Distinguish existing features from unfinished vault enforcement | Four-stage process with clear implementation badges |
+| Technical unlock | Explain why Soroban is important | Constrained reserve-vault visual, explicitly labeled as a contract draft |
+| Roadmap | Explain milestones without overclaiming | Current, next and longer-term scope |
+| FAQ | Clarify custody, funds, and security | Accessible native disclosure elements |
+| Closing | Guide the user into the application | Enter-app call to action |
+
+All numerical illustrations are labeled. The page does not initiate transactions, require authentication, or claim the vault is deployed.
+
+**Visual system:** original KoraGuard forest green, acid-lime highlight, warm ivory, editorial sans-serif paired with a restrained serif accent. No stock photos, floating purple shapes, generic gradient hero, infinite fake numbers or gratuitous particle effects. The animated financial graphics and icons are code-driven.
+
+**Motion system:** content masks with spatial offset, a tracked scroll-reading indicator, a mechanical balance reveal, a restrained instrument parallax, a precisely animated calculation bar, and functional hover/slider states. Motion honors `prefers-reduced-motion` and never gates navigation. We reviewed UI/UX Pro Max and UI-Max design guidance for motion, responsive layout, accessible focus states and performance; KoraGuard uses its own implementation. See [docs/DESIGN_AND_MOTION.md](docs/DESIGN_AND_MOTION.md) for the implementation notes and self-audit.
+
+**Status:** source prepared, but complete Next.js/Vercel and multi-device checks must still be completed before calling the release production-ready.
 
 ## The problem
 
@@ -41,13 +65,13 @@ The long-term product can support stablecoin workflows, recurring obligations, a
 5. Attempt to withdraw more than the available unreserved amount. The **contract must reject** that withdrawal.
 6. Authorize an allowed payment using the wallet, then open the transaction on a public Stellar explorer.
 
-**Key product distinction:** a warning in the interface is useful, but not sufficient. The buildathon's primary technical proof will be a **contract-enforced denied withdrawal**, followed by an approved payout. This final flow is **not yet working in V0.1**.
+**Key product distinction:** a warning in the interface is useful, but not sufficient. The buildathon's primary technical proof will be a **contract-enforced denied withdrawal**, followed by an approved payout. This final flow is **not yet working in V0.2**.
 
 ## Current build status
 
 We distinguish existing source code from independently verified on-chain behavior.
 
-| Component | State as of 21 Nov 2026 | Important limitation |
+| Component | State as of 22 Nov 2026 | Important limitation |
 | --- | --- | --- |
 | Responsive Next.js workspace | Implemented in source | Full production build and device QA pending |
 | Stellar Testnet wallet connection | Integration coded | Requires live wallet confirmation |
@@ -59,9 +83,10 @@ We distinguish existing source code from independently verified on-chain behavio
 | Soroban reserve vault | Rust draft in source | **Not compiled, audited, deployed, or connected to UI** |
 | Guarded stablecoin settlement | Planned | Not yet implemented |
 | Agent-assisted payments | Planned | No autonomous transfer authority in this release |
-| Landing storytelling, theme switcher, motion | Design roadmap | Current release is dashboard-first |
+| Animated long-form landing page | Implemented in source | Live browser and device visual QA pending |
+| Dashboard theme switcher | Planned | Accessible light/dark theme switcher not yet implemented |
 
-Do not use real assets. Do not claim that KoraGuard can prevent transfers initiated outside its own future vault. A planned commitment in V0.1 is **not an escrow**.
+Do not use real assets. Do not claim that KoraGuard can prevent transfers initiated outside its own future vault. A planned commitment in V0.2 is **not an escrow**.
 
 ## Why Stellar
 
@@ -80,7 +105,7 @@ Stellar wallet (user approval)
 Next.js client  -----  Horizon / Stellar RPC
     |                       |
     |                       +-- Read balances / inspect transactions
-    +-- Local commitments (V0.1 only)
+    +-- Local commitments (V0.2 only)
     +-- Safe-to-Pay advisory policy
     +-- Wallet-signed XLM Testnet transfers
     |
@@ -110,7 +135,7 @@ Read the technical detail and security boundaries in [docs/architecture.md](docs
 KoraGuard should look and behave like a credible financial product, not a generic blockchain dashboard.
 
 - **Visual identity:** deep forest green, restrained lime accents, warm whites, high contrast, and typography-led hierarchy. These are **KoraGuard's colors**, not a claim that green is Stellar's official brand palette.
-- **Story before dashboard:** planned long-form landing page explaining the problem, product, trust model, and actual progress before entering the workspace.
+- **Story before dashboard:** a full editorial landing page explains the problem, product, trust model, and actual progress before entering the workspace.
 - **Function before decoration:** useful empty states, real network signals, clear transaction confirmations, readable errors, no invented financial metrics, no fake demo balances.
 - **Mobile first:** accessible navigation, a properly aligned wallet action, clean payment review and receipt views.
 - **Motion with purpose:** subtle transitions and scroll-linked storytelling with reduced-motion support; avoid default AI-looking gradients.
@@ -161,7 +186,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open `http://localhost:3000`. The app currently uses a public Stellar Testnet Horizon endpoint by default. Never put credentials or wallet secrets in `NEXT_PUBLIC_` variables.
+Open `http://localhost:3000` for the animated landing page. Select **Enter the app** or open `http://localhost:3000/app` for the existing wallet workspace. The app currently uses a public Stellar Testnet Horizon endpoint by default. Never put credentials or wallet secrets in `NEXT_PUBLIC_` variables.
 
 ```bash
 # Run planning policy unit tests
@@ -177,7 +202,10 @@ The vault draft is under `contracts/koraguard-vault`. It still requires a workin
 ### Repository layout
 
 ```text
-app/                         Next.js app and responsive UI
+app/page.tsx                 Public scroll landing page
+app/landing.css               Scoped editorial design + motion system
+app/app/page.tsx              Existing wallet workspace at /app
+app/globals.css               Shared base styles and workspace UI
 lib/policy.ts                Safe-to-Pay policy and validation
 contracts/koraguard-vault/   Soroban Rust contract draft
 contracts/.../src/lib.rs     Vault source code
@@ -201,7 +229,7 @@ We will only label a flow **complete** after it can be repeated with real Testne
 
 ## Security and current limitations
 
-This is experimental software. No audit has been performed. Source code, UI tests, and a green build do not guarantee contract safety. The first release uses native XLM for payments while the draft vault targets a compatible token interface. Those are **separate flows** until the app integrates and tests the vault. Commitment amounts are advisory until then. No automatic or unattended spending is enabled.
+This is experimental software. No audit has been performed. Source code, UI tests, and a green build do not guarantee contract safety. The initial payment flow uses native XLM for payments while the draft vault targets a compatible token interface. Those are **separate flows** until the app integrates and tests the vault. Commitment amounts are advisory until then. No automatic or unattended spending is enabled.
 
 ## Contributing
 

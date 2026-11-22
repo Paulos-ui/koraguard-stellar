@@ -2,14 +2,16 @@
   "name": "koraguard-stellar",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "KoraGuard: protect commitments and move with confidence on Stellar",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:policy": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test:policy": "node --experimental-strip-types --test tests/policy.test.mjs",
+    "test:landing": "node --test tests/landing-structure.test.mjs",
+    "test": "npm run test:policy && npm run test:landing"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^17.2.1",
@@ -24,5 +26,7 @@
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0"
   },
-  "engines": { "node": ">=22.12.0" }
+  "engines": {
+    "node": ">=22.12.0"
+  }
 }

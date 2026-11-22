@@ -32,3 +32,22 @@ The web UI depends on the wallet extension or a supported in-wallet mobile brows
 ## Android phone only
 
 The official GitHub Mobile app cannot reliably upload this whole multi-folder project as a ZIP. For a phone-only workflow, see [docs/MOBILE_GITHUB.md](docs/MOBILE_GITHUB.md). It covers Termux installation, cloning the existing repository, preserving Git history, committing and pushing without a PC.
+
+## V0.2: update the live site from Android / Termux
+
+The new marketing landing lives at `/`; the original dashboard lives at `/app`.
+
+Use your existing cloned repo, not `git init`, so you preserve history:
+
+```bash
+cd ~/koraguard-stellar
+# Download KoraGuard-Stellar-V0.2.zip to Android Downloads first
+unzip -oq /storage/emulated/0/Download/KoraGuard-Stellar-V0.2.zip -d .
+git add -A
+git commit -m "feat: add KoraGuard editorial landing and scroll narrative"
+git push origin main
+```
+
+Vercel should redeploy the GitHub main branch. If a deployment fails, inspect the **first** TypeScript or build error. Do not disable type checking, static analysis, or production checks to force a green build.
+
+The previous app route `/app` deliberately retains wallet storage keys and existing wallet signing. All blockchain functions remain Testnet-only and should be re-tested end to end after deployment.

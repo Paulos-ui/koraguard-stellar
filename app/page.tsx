@@ -1,201 +1,187 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Asset, BASE_FEE, Horizon, Networks, Operation, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
-import { disconnect, getNetworkDetails, isConnected, requestAccess, signTransaction } from "@stellar/varial-sdk";
-import { assessSafety, canPlanPayment, normalizeAmount, type Commitment } from "@/lib/policy";
+import Link from "next/link";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import "./landing.css";
 
-type View = "overview" | "commitments" | "payments" | "activity" | "architecture";
-type Receipt = { id: string; hash: string; destination: string; amount: number; timestamp: string };
-const HORIZON = process.env.NEXT_PUBLIC_STELLAR_HORIZON || "https://horizon-testnet.stellar.org";
-const server = new Horizon.Server(HORIZON);
-const nav: { key: View; text: string; icon: string }[] = [
-  { key: "overview", text: "Overview", icon: "◫" },
-  { key: "commitments", text: "Commitments", icon: "▤" },
-  { key: "payments", text: "Make payment", icon: "↗" },
-  { key: "activity", text: "Receipts", icon: "▦" },
-  { key: "architecture", text: "How it works", icon: "⌘" },
-];
-const amountText = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
-const short = (address: string) => address ? `${address.slice(0, 6)}…${address.slice(-5)}` : "";
-const today = () => new Date().toISOString().slice(0, 10);
+const repository = "https://github.com/paulos-ui/koraguard-stellar";
+const fmt = (value: number) => Math.max(0, value).toLocaleString("en-US", { maximumFractionDigits: 0 });
 
-export default function Home() {
-  const [view, setView] = useState<View>("overview");
-  const [wallet, setWallet] = useState("");
-  const [balance, setBalance] = useState<number | null>(null);
-  const [commitments, setCommitments] = useState<Commitment[]>([]);
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newAmount, setNewAmount] = useState("");
-  const [newDue, setNewDue] = useState(today());
-  const [recipient, setRecipient] = useState("");
-  const [payAmount, setPayAmount] = useState("");
-  const [payTo, setPayTo] = useState("");
-  const [confirmPayment, setConfirmPayment] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+function Arrow({ diagonal = false }: { diagonal?: boolean }) {
+  return <svg className="kg-arrow" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+    {diagonal ? <path d="M4 14 14 4M6 4h8v8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /> : <path d="M2.5 9h12M10 4.5 14.5 9 10 13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />}
+  </svg>;
+}
 
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("koraguard-commitments-guest-v1") || "[]");
-      const txs = JSON.parse(localStorage.getItem("koraguard-receipts-guest-v1") || "[]");
-      if (Array.isArray(saved)) setCommitments(saved);
-      if (Array.isArray(txs)) setReceipts(txs);
-    } catch { /* Ignore malformed local data */ }
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(`koraguard-commitments-${wallet || "guest"}-v1`, JSON.stringify(commitments));
-  }, [commitments, hydrated, wallet]);
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(`koraguard-receipts-${wallet || "guest"}-v1`, JSON.stringify(receipts));
-  }, [receipts, hydrated, wallet]);
+function Monogram({ large = false }: { large?: boolean }) {
+  return <span className={`kg-monogram ${large ? "kg-monogram-large" : ""}`} aria-hidden="true">K<span className="kg-mark-cut" /></span>;
+}
 
-  // The 2 XLM hold is a deliberately conservative planning assumption, not a
-  // calculation of exact Stellar minimum balances / liabilities.
-  const networkHold = 2;
-  const safety = useMemo(() => assessSafety(balance ?? 0, commitments, networkHold), [balance, commitments]);
-  const upcoming = useMemo(() => [...commitments].sort((a, b) => a.due.localeCompare(b.due)), [commitments]);
-  const payNumber = normalizeAmount(payAmount);
-  const readyToPay = Boolean(wallet && payNumber && canPlanPayment(payNumber, safety) && StrKey.isValidEd25519PublicKey(payTo.trim()));
-
-  async function refreshBalance(address = wallet) {
-    if (!address) return;
-    const details = await server.loadAccount(address);
-    const native = details.balances.find((b) => b.asset_type === "native");
-    setBalance(Number(native?.balance ?? 0));
-  }
-
-  async function connectWallet() {
-    setError(""); setNotice(""); setBusy(true);
-    try {
-      const extension = await isConnected();
-      if (!extension.isConnected) throw new Error("Varial wallet is not available here. Install its browser extension or open KoraGuard in the Varial mobile app browser.");
-      const res = await requestAccess();
-      if (res.error || !res.address) throw new Error(res.error?.message || "Wallet access was not granted.");
-      const net = await getNetworkDetails();
-      if (net.error || net.network !== "TESTNET") throw new Error("Switch your Varial wallet to Stellar Testnet and reconnect.");
-      const owned = JSON.parse(localStorage.getItem(`koraguard-commitments-${res.address}-v1`) || "[]");
-      const savedReceipts = JSON.parse(localStorage.getItem(`koraguard-receipts-${res.address}-v1`) || "[]");
-      setCommitments(Array.isArray(owned) ? owned : []);
-      setReceipts(Array.isArray(savedReceipts) ? savedReceipts : []);
-      setWallet(res.address);
-      await refreshBalance(res.address);
-      setNotice("Stellar Testnet wallet connected. Your balance is read from the network.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not connect wallet."); }
-    finally { setBusy(false); }
-  }
-
-  async function leaveWallet() {
-    setError(""); setNotice("");
-    try { await disconnect(); } catch { /* Still clear local session. */ }
-    const guest = JSON.parse(localStorage.getItem("koraguard-commitments-guest-v1") || "[]");
-    const guestReceipts = JSON.parse(localStorage.getItem("koraguard-receipts-guest-v1") || "[]");
-    setCommitments(Array.isArray(guest) ? guest : []);
-    setReceipts(Array.isArray(guestReceipts) ? guestReceipts : []);
-    setWallet(""); setBalance(null);
-  }
-
-  async function reload() {
-    if (!wallet) return;
-    setBusy(true); setError("");
-    try { await refreshBalance(); setNotice("Balance refreshed from Stellar Testnet."); }
-    catch { setError("Could not refresh this address. Ensure the account is funded on Testnet."); }
-    finally { setBusy(false); }
-  }
-
-  function addCommitment(e: React.FormEvent) {
-    e.preventDefault(); setError(""); setNotice("");
-    const n = normalizeAmount(newAmount);
-    if (!newName.trim() || !n || !newDue) { setError("Enter a commitment name, valid positive amount and due date."); return; }
-    if (recipient && !StrKey.isValidEd25519PublicKey(recipient.trim())) { setError("Recipient must be a valid Stellar G-address or left blank."); return; }
-    setCommitments(prev => [...prev, { id: crypto.randomUUID(), label: newName.trim().slice(0, 70), amount: n, due: newDue, recipient: recipient.trim() || undefined, createdAt: new Date().toISOString() }]);
-    setNewName(""); setNewAmount(""); setNewDue(today()); setRecipient("");
-    setNotice("Commitment saved in this browser. On-chain locking is not enabled yet.");
-    setView("commitments");
-  }
-
-  async function sendPayment() {
-    setError(""); setNotice("");
-    if (!readyToPay || !payNumber || !wallet) { setError("Review the amount, recipient address and your remaining available funds."); return; }
-    setBusy(true);
-    try {
-      const net = await getNetworkDetails();
-      if (net.error || net.network !== "TESTNET") throw new Error("Wallet must be on Stellar Testnet.");
-      const source = await server.loadAccount(wallet);
-      const native = source.balances.find(b => b.asset_type === "native");
-      const actualBalance = Number(native?.balance ?? 0);
-      // Recompute immediately before signing because the user's on-chain balance may change.
-      const actual = assessSafety(actualBalance, commitments, networkHold);
-      if (!canPlanPayment(payNumber, actual)) throw new Error("The balance changed. This amount exceeds your available planning buffer.");
-      if (payTo.trim() === wallet) throw new Error("Enter a different destination account.");
-      // This initial version intentionally supports payments to existing accounts only.
-      try { await server.loadAccount(payTo.trim()); }
-      catch { throw new Error("Recipient account must already exist and be funded on Stellar Testnet."); }
-      const fee = await server.fetchBaseFee();
-      const tx = new TransactionBuilder(source, { fee: String(Math.max(fee, Number(BASE_FEE))), networkPassphrase: Networks.TESTNET })
-        .addOperation(Operation.payment({ destination: payTo.trim(), asset: Asset.native(), amount: payNumber.toFixed(7).replace(/0+$/, "").replace(/\.$/, "") }))
-        .setTimeout(120)
-        .build();
-      const signed = await signTransaction(tx.toXdr(), { networkPassphrase: Networks.TESTNET, address: wallet });
-      if (signed.error || !signed.signedTxXdr) throw new Error(signed.error?.message || "Transaction signing was cancelled.");
-      const submitted = await server.submitTransaction(TransactionBuilder.fromXdr(signed.signedTxXdr, Networks.TESTNET));
-      const proof = { id: crypto.randomUUID(), hash: submitted.hash, destination: payTo.trim(), amount: payNumber, timestamp: new Date().toISOString() };
-      setReceipts(prev => [proof, ...prev]);
-      setNotice(`Transaction confirmed on Testnet: ${short(submitted.hash)}. Open Receipts to inspect it.`);
-      setPayAmount(""); setPayTo(""); setConfirmPayment(false);
-      try { await refreshBalance(wallet); } catch { setNotice("Payment submitted. Balance refresh is temporarily unavailable. Verify the transaction in Receipts."); }
-      setView("activity");
-    } catch (e) { setError(e instanceof Error ? e.message : "Payment could not be submitted."); }
-    finally { setBusy(false); }
-  }
-
-  const goto = (target: View) => { setView(target); setMenuOpen(false); setNotice(""); setError(""); };
-
-  return <div className="app-shell">
-    <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
-      <div className="brand"><div className="brand-mark">K<span>✦</span></div><div><div className="brand-name">KoraGuard</div><div className="brand-sub">BUILT ON STELLAR</div></div></div>
-      <div className="sidebar-section">WORKSPACE</div>
-      <nav className="navigation">{nav.map(item => <button key={item.key} type="button" className={`nav-item ${view === item.key ? "active" : ""}`} onClick={() => goto(item.key)}><span className="nav-icon">{item.icon}</span>{item.text}{item.key === "architecture" && <span className="nav-mini">↗</span>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="sidebar-signal"><span className="signal-dot"/>TESTNET ENVIRONMENT</div><p>Clarity before every payment.<br/>Confidence after every transfer.</p><a href="https://github.com/paulos-ui/koraguard-stellar" target="_blank" rel="noreferrer">View source on GitHub ↗</a></div>
-    </aside>
-
-    <div className="workspace">
-      <header className="topbar"><div className="topbar-left"><button className="mobile-menu" type="button" onClick={() => setMenuOpen(!menuOpen)}>☰</button><span className="location">Workspace</span><span className="location-slash">/</span><span className="location-active">{nav.find(n => n.key === view)?.text}</span></div><div className="topbar-actions"><div className="testnet-chip"><span className="signal-dot"/>Stellar Testnet</div>{wallet ? <button className="wallet-button" type="button" onClick={leaveWallet} title="Disconnect Varial wallet"><span className="wallet-dot"/>{short(wallet)} <span className="disconnect-symbol">×</span></button> : <button className="button button-dark wallet-button" type="button" onClick={connectWallet} disabled={busy}>{busy ? "Connecting…" : "Connect wallet ↗"}</button>}</div></header>
-
-      <main className="main-content">
-        {error && <div className="toast toast-error"><span>!</span>{error}<button type="button" onClick={() => setError("")}>×</button></div>}
-        {notice && <div className="toast toast-ok"><span>✓</span>{notice}<button type="button" onClick={() => setNotice("")}>×</button></div>}
-
-        {view === "overview" && <>
-          <div className="heading-row"><div><div className="eyebrow"><span className="asterisk">✳</span> THE BUSINESS FINANCE CONTROL ROOM</div><h1>Make money moves.<br/><em>Without the money mistakes.</em></h1><p className="headline-desc">Know what is safe to spend, protect what matters, and move funds with the confidence of a clear plan.</p></div><div className="heading-stamp"><span>01 / 04</span><div>PLAN<br/>PROTECT<br/>PAY.</div></div></div>
-          <div className="hero-strip"><div className="hero-strip-copy"><span className="hero-strip-label">NOW BUILDING / V0.1</span><strong>Better decisions start<br/>before you hit send.</strong><p>Your reserve plan stays local. A smart-contract vault is the next build milestone.</p><button onClick={() => goto("commitments")} type="button">Create a commitment <span>↗</span></button></div><div className="hero-pattern" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit orbit-three"/><span>K</span></div></div>
-          <div className="section-title"><div><h2>Your money, in context</h2><p>Live balance + your local commitment plan</p></div><button className="subtle-link" type="button" onClick={reload} disabled={!wallet || busy}>↻ Refresh balance</button></div>
-          <div className="metric-grid">
-            <div className="metric-card"><div className="metric-heading">WALLET BALANCE <span>↗</span></div><div className="metric-value">{balance === null ? "—" : amountText(balance)} <small>{balance === null ? "" : "XLM"}</small></div><div className="metric-foot">{wallet ? "Live on Stellar Testnet" : "Connect a wallet to view"}</div></div>
-            <div className="metric-card"><div className="metric-heading">PLANNED COMMITMENTS <span>▤</span></div><div className="metric-value">{amountText(safety.reserved)} <small>XLM</small></div><div className="metric-foot">{commitments.length} local allocation{commitments.length === 1 ? "" : "s"}</div></div>
-            <div className="metric-card metric-main"><div className="metric-heading">PLANNED SAFE TO PAY <span>✦</span></div><div className="metric-value">{balance === null ? "—" : amountText(safety.safeToPay)} <small>{balance === null ? "" : "XLM"}</small></div><div className="metric-foot">After commitments &amp; a {networkHold} XLM planning hold</div></div>
-          </div>
-          <div className="overview-grid"><div className="panel decision-panel"><div className="panel-top"><span className="tag">THE KORAGUARD SIGNAL</span><span className="panel-tag">ADVISORY</span></div><div className="decision-body"><div className={`signal-icon signal-${safety.status}`}>{safety.status === "covered" ? "✓" : safety.status === "unfunded" ? "○" : "!"}</div><div><h3>{!wallet ? "Your money deserves a plan." : safety.status === "covered" ? "Commitments covered." : safety.status === "tight" ? "Your buffer is getting tight." : "Your commitments need attention."}</h3><p>{wallet ? safety.reason : "Connect a funded Testnet wallet, then map the obligations you need to protect."}</p></div></div><div className="signal-note"><span>WHAT THIS MEANS</span><p>This is a planning assessment, not an on-chain block. Funds are not locked until the Soroban vault is deployed and used.</p></div></div>
-            <div className="panel next-panel"><div className="panel-top"><span className="tag">UP NEXT</span><button className="subtle-link" type="button" onClick={() => goto("commitments")}>View all ↗</button></div>{upcoming.length ? <div className="commitment-rows">{upcoming.slice(0, 3).map(c => <div className="mini-commitment" key={c.id}><div className="letter-tile">{c.label[0].toUpperCase()}</div><div><strong>{c.label}</strong><small>Due {c.due}</small></div><b>{amountText(c.amount)} XLM</b></div>)}</div> : <div className="empty-block"><span className="empty-doodle">◇</span><b>No commitments planned yet</b><p>Start with a supplier invoice, salary, or recurring expense.</p><button className="button button-outline" type="button" onClick={() => goto("commitments")}>Add first commitment ↗</button></div>}</div></div>
-          <div className="trust-footer"><span>◉ ON-CHAIN PAYMENTS</span><span>⌁ NON-CUSTODIAL WALLET</span><span>▣ OPEN SOURCE</span><span>✧ MADE FOR REAL BUSINESSES</span></div>
-        </>}
-
-        {view === "commitments" && <><div className="simple-heading"><div className="eyebrow">01 / PLANNING</div><h1>Put every obligation<br/><em>in its place.</em></h1><p>Plan your commitments before spending. These allocations are stored in this browser and are not yet locked on-chain.</p></div><div className="two-col"><div className="panel form-panel"><div className="section-title form-title"><div><h2>New commitment</h2><p>Mark the money you want to protect</p></div></div><form onSubmit={addCommitment} className="form-stack"><label>WHAT IS THIS FOR?<input value={newName} maxLength={70} onChange={e => setNewName(e.target.value)} placeholder="e.g. Supplier invoice" required/></label><div className="input-two"><label>AMOUNT (XLM)<input value={newAmount} inputMode="decimal" onChange={e => setNewAmount(e.target.value)} placeholder="250.00" required/></label><label>PAYMENT DUE<input type="date" value={newDue} onChange={e => setNewDue(e.target.value)} required/></label></div><label>RECIPIENT ADDRESS <span>OPTIONAL</span><input value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="G..."/></label><button className="button button-dark full" type="submit">Save commitment ↗</button></form></div><div className="panel list-panel"><div className="section-title form-title"><div><h2>Upcoming commitments</h2><p>{commitments.length} item{commitments.length === 1 ? "" : "s"} • {amountText(safety.reserved)} XLM planned</p></div></div>{upcoming.length ? <div className="commitment-list">{upcoming.map(c => <div key={c.id} className="commitment-item"><div><b>{c.label}</b><p>Due {c.due}{c.recipient ? ` • ${short(c.recipient)}` : ""}</p></div><strong>{amountText(c.amount)} XLM</strong><button type="button" aria-label={`Remove ${c.label}`} title="Remove commitment" onClick={() => setCommitments(prev => prev.filter(x => x.id !== c.id))}>×</button></div>)}</div> : <div className="empty-block roomy"><span className="empty-doodle">◈</span><b>Your commitments will appear here.</b><p>Plan future obligations to see your remaining budget.</p></div>}</div></div></>}
-
-        {view === "payments" && <><div className="simple-heading"><div className="eyebrow">02 / EXECUTION</div><h1>Pay with purpose.<br/><em>Proof comes built in.</em></h1><p>Send real XLM on Stellar Testnet with Varial. KoraGuard checks your local spending plan before requesting your wallet signature.</p></div><div className="two-col"><div className="panel form-panel"><div className="section-title form-title"><div><h2>New Testnet payment</h2><p>Recipient must have a funded Stellar account</p></div></div><div className="payment-warning"><strong>TESTNET XLM ONLY</strong><p>This action submits an actual Testnet transaction after wallet approval. It does not use a deployed vault or stablecoin yet.</p></div><form onSubmit={e => { e.preventDefault(); if (!wallet) connectWallet(); else setConfirmPayment(true); }} className="form-stack"><label>RECIPIENT STELLAR ADDRESS<input value={payTo} onChange={e => setPayTo(e.target.value.trim())} placeholder="G..." required/></label><label>PAYMENT AMOUNT (XLM)<input inputMode="decimal" value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder="0.5" required/></label><div className="inline-preview"><span>Available by plan</span><strong>{wallet ? amountText(safety.safeToPay) : "—"} XLM</strong></div><button className="button button-dark full" type="submit" disabled={busy || (Boolean(wallet) && !readyToPay)}>{!wallet ? "Connect wallet to continue ↗" : "Review payment ↗"}</button>{wallet && payNumber && !canPlanPayment(payNumber, safety) && <p className="field-error">This amount is above the available planning buffer.</p>}</form></div><div className="panel explanation-panel"><span className="tag">HOW THE PAYMENT WORKS</span><div className="steps"><div><span>01</span><div><b>Check commitments</b><p>KoraGuard calculates your local available funds.</p></div></div><div><span>02</span><div><b>Approve in your wallet</b><p>Varial signs the actual Stellar Testnet transaction.</p></div></div><div><span>03</span><div><b>Keep the receipt</b><p>Open an independent Testnet explorer record.</p></div></div></div><div className="caution-box">Your wallet remains in your control. This version cannot prevent payments made in other apps; contract-enforced reserves are a separate development milestone.</div></div></div>
-          {confirmPayment && <div className="modal-backdrop" onClick={() => setConfirmPayment(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm testnet payment" onClick={e => e.stopPropagation()}><div className="eyebrow">FINAL REVIEW / STELLAR TESTNET</div><h2>Approve this payment?</h2><div className="modal-amount">{payNumber} <small>XLM</small></div><p className="modal-destination">To {short(payTo)}</p><p>Only continue if the amount and recipient are correct. You will be asked to approve in Varial.</p><div className="modal-buttons"><button className="button button-outline" onClick={() => setConfirmPayment(false)} type="button">Cancel</button><button className="button button-dark" onClick={sendPayment} disabled={busy} type="button">{busy ? "Submitting…" : "Sign and send ↗"}</button></div></div></div>}
-        </>}
-
-        {view === "activity" && <><div className="simple-heading"><div className="eyebrow">03 / VERIFICATION</div><h1>A payment made.<br/><em>A receipt that stays.</em></h1><p>Every successful payment from this browser session is linked to independent Stellar Testnet transaction evidence.</p></div><div className="panel list-panel full-panel"><div className="section-title form-title"><div><h2>Payment receipts</h2><p>Recorded locally in this browser</p></div><span className="small-count">{receipts.length} RECEIPTS</span></div>{receipts.length ? <div className="receipt-list">{receipts.map(r => <div className="receipt" key={r.id}><div className="receipt-coin">↗</div><div className="receipt-description"><b>{amountText(r.amount)} XLM sent</b><small>{new Date(r.timestamp).toLocaleString()} • To {short(r.destination)}</small><span className="tx-hash">TX: {short(r.hash)}</span></div><a href={`https://stellar.expert/explorer/testnet/tx/${encodeURIComponent(r.hash)}`} target="_blank" rel="noreferrer">Verify on-chain ↗</a></div>)}</div> : <div className="empty-block roomy"><span className="empty-doodle">▱</span><b>No verified payments yet.</b><p>Your first completed testnet transfer will appear here.</p><button className="button button-outline" type="button" onClick={() => goto("payments")}>Make a payment ↗</button></div>}</div></>}
-
-        {view === "architecture" && <><div className="simple-heading"><div className="eyebrow">04 / OPEN DEVELOPMENT</div><h1>Trust should be<br/><em>something you can verify.</em></h1><p>A transparent view of what is working now and what we are building next.</p></div><div className="architecture-grid"><div className="panel architecture-card"><span className="phase phase-working">BUILDING NOW</span><h2>Client-side planning</h2><p>Local commitments, live Testnet XLM balance, payment approval with Varial, and transaction evidence.</p><span className="tech-label">NEXT.JS · STELLAR SDK · VARIAL</span></div><div className="panel architecture-card"><span className="phase phase-progress">CONTRACT IN SOURCE</span><h2>Guarded reserve vault</h2><p>Rust smart contract draft for deposits, owner-defined commitments, cancellations, and restricted payouts. Not deployed or integrated.</p><span className="tech-label">RUST · SOROBAN SDK</span></div><div className="panel architecture-card"><span className="phase phase-future">PLANNED</span><h2>Stablecoin workflows</h2><p>Asset-specific planning, live contract calls, team payment requests, and policy-aware agent-assisted payment preparation.</p><span className="tech-label">STELLAR ASSET CONTRACTS · RPC</span></div></div><div className="panel roadmap"><div className="panel-top"><span className="tag">ONE-WEEK BUILDER MILESTONES</span></div><div className="roadmap-list"><div><strong>01</strong><span>Wallet + payments</span><small>Testnet payment flow and receipts</small></div><div><strong>02</strong><span>Contract verification</span><small>Compile, test and deploy vault contract</small></div><div><strong>03</strong><span>Live vault integration</span><small>Lock and release token funds on-chain</small></div><div><strong>04</strong><span>Showcase evidence</span><small>Independent transaction / contract proofs</small></div></div></div></>}
-        <footer className="page-footer"><span>© 2026 KoraGuard. Built with intention.</span><span>TESTNET BUILD · NO REAL-MONEY GUARANTEES</span></footer>
-      </main>
+function MoneyInstrument() {
+  return <div className="kg-instrument" aria-label="Illustrative reserve and spending breakdown">
+    <div className="kg-instrument-header"><span><i className="kg-live-dot" />LIVE PREVIEW / 01</span><span>ILLUSTRATIVE VALUES</span></div>
+    <div className="kg-instrument-body">
+      <div className="kg-instrument-topline"><span>YOUR WORKING BALANCE</span><span className="kg-small-cross">✳</span></div>
+      <div className="kg-big-balance"><span>2,450</span><small>XLM</small></div>
+      <div className="kg-instrument-divider" />
+      <div className="kg-ledger-item"><span><i className="kg-swatch kg-swatch-dark" />Committed</span><strong>1,200 XLM</strong></div>
+      <div className="kg-ledger-item"><span><i className="kg-swatch kg-swatch-grey" />Planning buffer</span><strong>2 XLM</strong></div>
+      <div className="kg-ledger-track" aria-hidden="true"><span className="kg-ledger-locked" /><span className="kg-ledger-buffer" /><span className="kg-ledger-free" /></div>
+      <div className="kg-instrument-result"><div><span>SAFE TO PLAN</span><strong>1,248 <small>XLM</small></strong></div><div className="kg-dial"><svg viewBox="0 0 70 70" aria-hidden="true"><circle cx="35" cy="35" r="27" fill="none" stroke="#D7E5CA" strokeWidth="5"/><circle className="kg-dial-fill" cx="35" cy="35" r="27" fill="none" stroke="#284736" strokeWidth="5" strokeLinecap="round" strokeDasharray="169.65" strokeDashoffset="86.4" transform="rotate(-90 35 35)"/></svg><span>51%</span></div></div>
     </div>
+    <div className="kg-instrument-foot"><span>NOT A LIVE WALLET BALANCE</span><span>STELLAR / TESTNET</span></div>
+  </div>;
+}
+
+function ReserveSimulator() {
+  const [balance, setBalance] = useState(2500);
+  const [committed, setCommitted] = useState(1400);
+  const [proposed, setProposed] = useState(750);
+  const networkBuffer = 2;
+  const available = Math.max(0, balance - committed - networkBuffer);
+  const approved = proposed <= available;
+  const reservedPct = Math.min(100, (committed / balance) * 100);
+  const spendablePct = Math.min(100 - reservedPct, (available / balance) * 100);
+  const barStyle = { "--kg-reserved": `${reservedPct}%`, "--kg-free": `${spendablePct}%` } as CSSProperties;
+
+  return <div className="kg-simulator">
+    <div className="kg-sim-header"><span className="kg-micro">LIVE PLANNING STUDY</span><span className="kg-sim-indicator"><i /> INTERACTIVE EXAMPLE</span></div>
+    <div className="kg-sim-body">
+      <div className="kg-sim-top"><p>Your money, <em>in context.</em></p><span>01 / ADJUST</span></div>
+      <div className="kg-sim-controls">
+        <label className="kg-range-field"><span><span>Wallet balance</span><strong>{fmt(balance)} XLM</strong></span><input aria-label="Illustrative wallet balance in XLM" type="range" min="500" max="5000" step="50" value={balance} onChange={e => setBalance(Number(e.target.value))}/></label>
+        <label className="kg-range-field"><span><span>Money committed</span><strong>{fmt(committed)} XLM</strong></span><input aria-label="Illustrative committed funds in XLM" type="range" min="0" max="5000" step="50" value={committed} onChange={e => setCommitted(Number(e.target.value))}/></label>
+        <label className="kg-range-field"><span><span>Payment to review</span><strong>{fmt(proposed)} XLM</strong></span><input aria-label="Illustrative payment amount in XLM" type="range" min="50" max="3000" step="50" value={proposed} onChange={e => setProposed(Number(e.target.value))}/></label>
+      </div>
+      <div className="kg-sim-breakdown"><div className="kg-bar-track" style={barStyle} aria-hidden="true"><i className="kg-bar-reserved"/><i className="kg-bar-free"/></div><div className="kg-bar-legend"><span><i className="kg-legend-committed" /> Committed</span><span><i className="kg-legend-spendable" /> Available</span><span><i className="kg-legend-over" /> Unavailable</span></div></div>
+      <div className="kg-sim-summary"><div><span>AVAILABLE BY PLAN</span><strong>{fmt(available)} <small>XLM</small></strong></div><div className={`kg-sim-verdict ${approved ? "kg-verdict-positive" : "kg-verdict-negative"}`} role="status" aria-live="polite"><span>{approved ? "WITHIN PLAN" : "OVER BUDGET"}</span><b>{approved ? "Payment fits" : "Review needed"}</b><small>{approved ? "This request leaves your planned commitments covered." : "This request would exceed the money left after commitments."}</small></div></div>
+    </div>
+    <p className="kg-sim-disclaimer">Illustrative client-side calculation with a 2 XLM planning buffer. This is not a real wallet check or an on-chain spending restriction. Contract enforcement is in development.</p>
+  </div>;
+}
+
+const milestones = [
+  ["01", "Understand", "Connect a Stellar Testnet wallet and read a real account balance.", "IN INITIAL APP"],
+  ["02", "Plan", "Map upcoming obligations and calculate a spending buffer.", "IN INITIAL APP"],
+  ["03", "Pay & verify", "Request a wallet signature, submit a Testnet XLM payment, and follow the receipt.", "IN INITIAL APP"],
+  ["04", "Enforce", "Compile, audit, and deploy the Soroban vault to enforce actual reserve constraints.", "IN DEVELOPMENT"],
+];
+
+const questions = [
+  ["Is KoraGuard already protecting on-chain funds?", "Not yet. V0.2 has browser-based planning and an initial Stellar Testnet payment interface. The Soroban vault exists as a draft in source code and still needs tests, deployment, and live integration."],
+  ["Do I need real money to explore it?", "No. The first version targets Stellar Testnet and uses Testnet XLM. Testnet tokens are not redeemable for real-world value."],
+  ["Does KoraGuard hold my private keys?", "No. Payments are intended to be authorized by your connected wallet. Never enter a seed phrase or private key into the site."],
+  ["What is next for the product?", "Verified on-chain vault enforcement, asset-aware planning for stablecoins, richer recurring payment workflows, and stronger team approval policies, subject to testing and security review."],
+];
+
+export default function Landing() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const progress = useRef<HTMLDivElement>(null);
+  const instrument = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const doc = document.documentElement;
+    doc.classList.add("kg-js-ready");
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const targets = document.querySelectorAll<HTMLElement>(".kg-reveal");
+    if (!reduceMotion && "IntersectionObserver" in window) {
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            (entry.target as HTMLElement).classList.add("kg-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -32px 0px" });
+      targets.forEach(target => observer.observe(target));
+      const initialTimer = window.setTimeout(() => targets.forEach(target => {
+        if (target.getBoundingClientRect().top < window.innerHeight) target.classList.add("kg-visible");
+      }), 100);
+      return () => { observer.disconnect(); window.clearTimeout(initialTimer); doc.classList.remove("kg-js-ready"); };
+    }
+    targets.forEach(target => target.classList.add("kg-visible"));
+    return () => doc.classList.remove("kg-js-ready");
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function update() {
+      frame = 0;
+      const distance = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      if (progress.current) progress.current.style.transform = `scaleX(${Math.min(1, window.scrollY / distance)})`;
+      if (instrument.current && !reduceMotion.matches) {
+        instrument.current.style.setProperty("--kg-parallax", `${Math.min(34, window.scrollY * 0.065)}px`);
+      }
+    }
+    function onScroll() { if (!frame) frame = window.requestAnimationFrame(update); }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (frame) cancelAnimationFrame(frame); };
+  }, []);
+
+  const closeMenu = () => setMenuOpen(false);
+
+  return <div className="kg-site" id="top">
+    <a className="kg-skip" href="#main-content">Skip to main content</a>
+    <div ref={progress} className="kg-scroll-progress" aria-hidden="true" />
+    <div className="kg-hero-wrap">
+      <header className="kg-header">
+        <Link className="kg-logo" href="/" aria-label="KoraGuard home" onClick={closeMenu}><Monogram /><span><strong>KoraGuard</strong><small>BUILT ON STELLAR</small></span></Link>
+        <nav id="kg-navigation" className={`kg-header-nav ${menuOpen ? "kg-header-nav-open" : ""}`} aria-label="Main navigation">
+          <a href="#problem" onClick={closeMenu}>The problem</a><a href="#lab" onClick={closeMenu}>Explore the logic</a><a href="#approach" onClick={closeMenu}>Our approach</a><a href="#roadmap" onClick={closeMenu}>Roadmap</a>
+          <Link href="/app" onClick={closeMenu} className="kg-nav-mobile-cta">Enter the app <Arrow diagonal /></Link>
+        </nav>
+        <Link className="kg-nav-cta" href="/app">Enter the app <Arrow diagonal /></Link>
+        <button type="button" className="kg-menu-button" aria-label={menuOpen ? "Close navigation" : "Open navigation"} aria-expanded={menuOpen} aria-controls="kg-navigation" onClick={() => setMenuOpen(open => !open)}><span/><span/></button>
+      </header>
+
+      <section className="kg-hero kg-container" aria-labelledby="kg-hero-title">
+        <div className="kg-hero-copy"><div className="kg-overline kg-reveal"><span className="kg-overline-mark">✳</span> FINANCIAL CLARITY, BUILT ON STELLAR <span className="kg-overline-index">/ 001</span></div>
+          <h1 id="kg-hero-title" className="kg-reveal kg-hero-headline">Every payment<br/>has a <em>before.</em></h1>
+          <p className="kg-hero-lede kg-reveal">The balance in your wallet is only half the story. KoraGuard helps you see the money you’ve already promised before you decide what to spend next.</p>
+          <div className="kg-hero-actions kg-reveal"><Link className="kg-pill kg-pill-light" href="/app">Enter KoraGuard <Arrow diagonal /></Link><a className="kg-text-link" href="#problem">Discover the thinking <span>↓</span></a></div>
+          <div className="kg-hero-note kg-reveal"><span className="kg-note-line"/><span>TESTNET-FIRST · OPEN SOURCE · BUILT IN PUBLIC</span></div>
+        </div>
+        <div className="kg-hero-art kg-reveal" ref={instrument}><div className="kg-orbit-outer" aria-hidden="true"><span>KG / RESERVE SYSTEM</span><b>01</b></div><div className="kg-art-frame"><MoneyInstrument /></div><div className="kg-art-caption"><span>01 — BALANCE</span><span>02 — OBLIGATIONS</span><span>03 — DECISION</span></div></div>
+      </section>
+      <div className="kg-hero-bottom kg-container"><span>SCROLL TO UNDERSTAND</span><div className="kg-hero-rule" /><span>↓ 01 / WHY WE EXIST</span></div>
+    </div>
+
+    <main id="main-content">
+    <section id="problem" className="kg-problem kg-section-light" aria-labelledby="kg-problem-title">
+      <div className="kg-container"><div className="kg-section-intro kg-reveal"><span className="kg-section-count">01 / THE PROBLEM</span><span className="kg-section-type">THE INVISIBLE COST OF PAYING TOO SOON</span></div>
+        <div className="kg-problem-layout"><h2 id="kg-problem-title" className="kg-display kg-reveal">A balance<br/>isn’t a <em>budget.</em></h2><div className="kg-problem-aside kg-reveal"><p>One number tells you what you have. It doesn’t tell you what you owe, what’s due, or what you can safely move.</p><div className="kg-problem-quote">“Can I make this payment without putting the next one at risk?”</div><span>THE QUESTION YOUR WALLET DOESN’T ANSWER</span></div></div>
+        <div className="kg-balance-story kg-reveal"><div><small>ACCOUNT BALANCE</small><strong>2,450 <i>XLM</i></strong><span>Money you can see</span></div><span className="kg-story-operator">−</span><div><small>PLANNED OBLIGATIONS</small><strong>1,200 <i>XLM</i></strong><span>Money already spoken for</span></div><span className="kg-story-operator">=</span><div className="kg-story-outcome"><small>AVAILABLE BY PLAN</small><strong>1,248 <i>XLM</i></strong><span>After a 2 XLM planning buffer</span></div></div>
+        <p className="kg-example-foot">Illustrative example. Actual available funds depend on Stellar account requirements and changing balances.</p>
+      </div>
+    </section>
+
+    <section className="kg-manifesto" aria-label="Our product philosophy"><div className="kg-container kg-manifesto-inner"><span className="kg-manifesto-symbol" aria-hidden="true">✳</span><p className="kg-reveal">Good financial infrastructure should help you <em>keep your promises</em>, not just move your money.</p><span className="kg-manifesto-side">THE KORAGUARD PRINCIPLE / 2026</span></div></section>
+
+    <section id="lab" className="kg-lab kg-section-light" aria-labelledby="kg-lab-title"><div className="kg-container"><div className="kg-section-intro kg-reveal"><span className="kg-section-count">02 / TRY THE THINKING</span><span className="kg-section-type">INTERACTIVE PLANNING LAB</span></div>
+      <div className="kg-lab-layout"><div className="kg-lab-copy kg-reveal"><h2 className="kg-display" id="kg-lab-title">See what’s <em>really</em><br/>available.</h2><p>Move the numbers. Add a commitment. Try a payment. See how the available balance changes before you touch a wallet.</p><div className="kg-lab-aside"><b>PLANNING FIRST. EXECUTION SECOND.</b><span>This interactive example demonstrates the budgeting logic. It does not move funds or lock assets.</span></div></div><div className="kg-reveal"><ReserveSimulator /></div></div>
+    </div></section>
+
+    <section id="approach" className="kg-approach" aria-labelledby="kg-approach-title"><div className="kg-container"><div className="kg-section-intro kg-reveal"><span className="kg-section-count">03 / THE APPROACH</span><span className="kg-section-type">FROM INTENTION TO EVIDENCE</span></div>
+      <div className="kg-approach-heading"><h2 id="kg-approach-title" className="kg-display kg-reveal">Not another<br/><em>finance dashboard.</em></h2><p className="kg-reveal">We’re building a more deliberate payment workflow, from understanding your obligations to independently verifying a completed transfer.</p></div>
+      <div className="kg-steps-track"><div className="kg-steps-spine" aria-hidden="true" />{milestones.map((item, index) => <article key={item[0]} className="kg-step kg-reveal"><div className="kg-step-number"><span>{item[0]}</span><i /></div><div className="kg-step-text"><h3>{item[1]}</h3><p>{item[2]}</p></div><span className={`kg-step-status ${index === 3 ? "kg-step-future" : ""}`}>{item[3]}</span></article>)}</div>
+      <div className="kg-approach-foot kg-reveal"><span>SECURITY IS AN IMPLEMENTATION REQUIREMENT, NOT A SLOGAN.</span><Link href="/app">Explore the initial app <Arrow diagonal /></Link></div>
+    </div></section>
+
+    <section className="kg-story-panel" aria-label="What we are building"><div className="kg-container"><div className="kg-story-grid"><div className="kg-story-text kg-reveal"><span className="kg-section-count">THE TECHNICAL UNLOCK / STELLAR</span><h2>Rules that can live <em>where the money lives.</em></h2><p>Today, KoraGuard calculates a safe-to-plan amount in your browser. The next step is a Soroban vault that can enforce reserve limits on-chain, even when a UI would prefer to say yes.</p><Link className="kg-outline-link" href="/app">View what works today <Arrow diagonal /></Link></div><div className="kg-vault-graphic kg-reveal" aria-hidden="true"><div className="kg-vault-rail"><span>FUNDS</span><span>POLICY</span><span>PROOF</span></div><div className="kg-vault-center"><span className="kg-vault-cross">✳</span><div className="kg-vault-disc"><span>K</span></div><p>GUARDED<br/>RESERVE</p></div><div className="kg-vault-bottom"><span>CONTRACT DRAFT / NOT DEPLOYED</span><span>⟶</span></div></div></div></div></section>
+
+    <section id="roadmap" className="kg-roadmap kg-section-light" aria-labelledby="kg-roadmap-title"><div className="kg-container"><div className="kg-section-intro kg-reveal"><span className="kg-section-count">04 / BUILDING IN PUBLIC</span><span className="kg-section-type">A ROADMAP WITH REAL CHECKPOINTS</span></div>
+      <div className="kg-roadmap-layout"><div className="kg-roadmap-copy kg-reveal"><h2 id="kg-roadmap-title" className="kg-display">Proof over<br/><em>promises.</em></h2><p>We’d rather show a tested payment than promise a magical agent. Our roadmap keeps the difference between an interface, a smart contract draft, and a deployed product unmistakably clear.</p><a className="kg-text-link kg-text-link-dark" target="_blank" rel="noopener noreferrer" href={repository}>Follow the open-source build <Arrow diagonal /></a></div><div className="kg-roadmap-list"><div className="kg-roadmap-item kg-reveal"><span>NOW</span><div><h3>Foundation</h3><p>Dashboard, browser-based commitments, Testnet wallet integration, payment flow and receipt viewer.</p></div><b>V0.2</b></div><div className="kg-roadmap-item kg-reveal"><span>NEXT</span><div><h3>On-chain protection</h3><p>Vault contract tests, deployment, funding, withdrawal constraints and transaction evidence.</p></div><b>BUILD</b></div><div className="kg-roadmap-item kg-reveal"><span>AFTER</span><div><h3>Stablecoin intelligence</h3><p>Asset-aware reserves, recurring payments, and more robust approval workflows.</p></div><b>EXPAND</b></div></div></div>
+      <div className="kg-disclosure kg-reveal"><span>✳</span><p><strong>Transparent by default.</strong> This is an early Testnet build. It does not custody mainnet funds, guarantee payment safety, or currently enforce reserves on-chain.</p></div>
+    </div></section>
+
+    <section className="kg-faq" aria-labelledby="kg-faq-title"><div className="kg-container kg-faq-layout"><div className="kg-reveal"><span className="kg-section-count">05 / GOOD TO KNOW</span><h2 id="kg-faq-title">No fine print.<br/><em>Just clarity.</em></h2></div><div className="kg-faq-list kg-reveal">{questions.map(([question, answer]) => <details key={question}><summary>{question}<span aria-hidden="true">+</span></summary><p>{answer}</p></details>)}</div></div></section>
+
+    <section className="kg-final" aria-labelledby="kg-final-title"><div className="kg-container kg-final-inner"><div className="kg-final-small"><span>✳ YOUR NEXT PAYMENT STARTS HERE</span><span>STELLAR / OPEN DEVELOPMENT</span></div><h2 id="kg-final-title" className="kg-reveal">Make the move.<br/><em>Keep the promise.</em></h2><div className="kg-final-actions kg-reveal"><p>Start by understanding what your balance can really do. Explore the first version on Stellar Testnet.</p><Link href="/app" className="kg-final-button">Enter the app <Arrow diagonal /></Link></div><div className="kg-final-giant" aria-hidden="true">KORAGUARD</div></div></section>
+
+    </main>
+    <footer className="kg-site-footer"><div className="kg-container"><div className="kg-footer-main"><Link href="/" className="kg-logo"><Monogram /><span><strong>KoraGuard</strong><small>BUILT ON STELLAR</small></span></Link><p>Financial clarity for the money you’re about to move.</p><div><Link href="/app">App</Link><a href={repository} target="_blank" rel="noopener noreferrer">GitHub</a><a href="#top">Back to top ↑</a></div></div><div className="kg-footer-bottom"><span>© 2026 KoraGuard</span><span>TESTNET-FIRST · NO FINANCIAL GUARANTEES</span><span>BUILT FOR CLARITY.</span></div></div></footer>
   </div>;
 }
